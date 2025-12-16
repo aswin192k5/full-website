@@ -16,11 +16,12 @@ public class DeviceController {
     @Autowired
     private EspDataRepository espDataRepository;
 
-    // Normalize MAC (very important)
+    // Normalize MAC address
     private String normalizeMac(String mac) {
-        return mac.trim().toUpperCase().replace("-", ":");
+        return mac == null ? "" : mac.trim().toUpperCase().replace("-", ":");
     }
 
+    // ===================== LATEST DATA =====================
     // GET /api/device/latest/{mac}
     @GetMapping("/latest/{espMac}")
     public ResponseEntity<?> getLatestData(@PathVariable String espMac) {
@@ -30,15 +31,21 @@ public class DeviceController {
         EspData latest = espDataRepository
                 .findTopByEspMacOrderByTimestampDesc(normalizedMac);
 
+        // ESP32 OFF / No data yet
         if (latest == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("error", "No data found", "espMac", normalizedMac));
+                    .body(Map.of(
+                            "error", "No data found",
+                            "espMac", normalizedMac
+                    ));
         }
 
         double voltage = latest.getVoltage() != null ? latest.getVoltage() : 0.0;
         double current = latest.getEnergyUsage() != null ? latest.getEnergyUsage() : 0.0;
         double power   = latest.getPower() != null ? latest.getPower() : voltage * current;
-        long timestamp = latest.getTimestamp() != null ? latest.getTimestamp().getTime() : 0L;
+        long timestamp = latest.getTimestamp() != null
+                ? latest.getTimestamp().getTime()
+                : 0L;
 
         return ResponseEntity.ok(Map.of(
                 "voltageV", voltage,
@@ -48,6 +55,7 @@ public class DeviceController {
         ));
     }
 
+    // ===================== DEVICE STATUS =====================
     // GET /api/device/status/{mac}
     @GetMapping("/status/{espMac}")
     public ResponseEntity<?> getStatus(@PathVariable String espMac) {
@@ -57,6 +65,7 @@ public class DeviceController {
         EspData latest = espDataRepository
                 .findTopByEspMacOrderByTimestampDesc(normalizedMac);
 
+        // Case 1: No data at all
         if (latest == null) {
             return ResponseEntity.ok(Map.of(
                     "onlineStatus", false,
@@ -64,13 +73,20 @@ public class DeviceController {
             ));
         }
 
-        long now = System.currentTimeMillis();
-        long last = latest.getTimestamp().getTime();
-        boolean online = (now - last) < 15_000;
+        // Case 2: Timestamp is null (PREVENTS 500 ERROR)
+        if (latest.getTimestamp() == null) {
+            return ResponseEntity.ok(Map.of(
+                    "onlineStatus", false,
+                    "lastSeen", null
+            ));
+        }
+
+        long lastSeen = latest.getTimestamp().getTime();
+        boolean online = (System.currentTimeMillis() - lastSeen) < 15_000;
 
         return ResponseEntity.ok(Map.of(
                 "onlineStatus", online,
-                "lastSeen", last
+                "lastSeen", lastSeen
         ));
     }
 }
